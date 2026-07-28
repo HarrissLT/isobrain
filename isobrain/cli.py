@@ -5,6 +5,9 @@ from prompt_toolkit import PromptSession
 from isobrain.core.intent_engine import IntentEngine
 from isobrain.plugins.office_plugins import OfficePlugins
 from isobrain.plugins.file_plugin import FilePlugins
+from isobrain.plugins.system_plugin import SystemPlugins
+from isobrain.plugins.code_plugin import CodePlugins
+from isobrain.plugins.viz_plugin import VizPlugins
 from isobrain.ui.banner import display_welcome_banner
 from isobrain.ui.completer import IsoBrainCompleter, SmartAutoSuggest
 
@@ -12,8 +15,8 @@ console = Console()
 
 def execute_handler(handler, entities: dict):
     """
-    Dispatcher an toàn: Tự động lọc bỏ các tham số dư thừa 
-    không nằm trong định nghĩa của hàm handler.
+    Dispatcher an toàn: Tự động kiểm tra tham số của hàm handler
+    và lọc bỏ các tham số dư thừa do Fuzzy Matcher trích xuất rác.
     """
     sig = inspect.signature(handler)
     has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
@@ -21,7 +24,6 @@ def execute_handler(handler, entities: dict):
     if has_kwargs:
         return handler(**entities)
     
-    # Lọc chỉ giữ lại những tham số mà handler thực sự yêu cầu
     valid_keys = set(sig.parameters.keys())
     filtered_entities = {k: v for k, v in entities.items() if k in valid_keys}
     
@@ -30,7 +32,8 @@ def execute_handler(handler, entities: dict):
 def build_engine() -> IntentEngine:
     engine = IntentEngine()
     
-    # 1. File: Tạo File mới
+    # ==================== 1. TỰ ĐỘNG HÓA FILE & THƯ MỤC ====================
+    # Tạo File mới (.docx, .xlsx, .txt)
     engine.register(
         intent_name="FILE_CREATE",
         pattern=r"""tạo\s+file\s+(?:có\s+tên\s+và\s+định\s+dạng\s+là\s+)?["']?\s*(?P<file_name>[\w\.-]+\.(?:docx|xlsx|pdf|txt))\s*["']?\s+trong\s+(?:thư\s+mục\s+)?(?P<folder_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)""",
@@ -38,7 +41,7 @@ def build_engine() -> IntentEngine:
         handler=lambda file_name, folder_path: FilePlugins.create_file(file_name, folder_path)
     )
 
-    # 2. File: Đổi tên hàng loạt
+    # Đổi tên hàng loạt trong thư mục
     engine.register(
         intent_name="FILE_BATCH_RENAME",
         pattern=r"""đổi\s+tên\s+hàng\s+loạt\s+trong\s+(?P<folder_path>[a-zA-Z]:\\[^"'\n]+?|["'].+?["'])\s+từ\s+["']?(?P<old_str>[^\s"']+)["']?\s+thành\s+["']?(?P<new_str>[^\s"']+)["']?""",
@@ -46,7 +49,16 @@ def build_engine() -> IntentEngine:
         handler=lambda folder_path, old_str, new_str: FilePlugins.batch_rename(folder_path, old_str, new_str)
     )
 
-    # 3. Word: Đổi Font Chữ (Chấp nhận cả 'sang' và 'thành')
+    # Liệt kê danh sách file theo định dạng
+    engine.register(
+        intent_name="FILE_LIST_BY_EXT",
+        pattern=r"""liệt\s+kê\s+file\s+(?P<extension>\.\w+|\w+)\s+trong\s+(?P<folder_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)""",
+        keywords=["liệt kê file", "danh sách file"],
+        handler=lambda extension, folder_path: FilePlugins.list_files_by_ext(folder_path, extension)
+    )
+
+    # ==================== 2. TỰ ĐỘNG HÓA WORD & OFFICE ====================
+    # Đổi Font Chữ Word
     engine.register(
         intent_name="WORD_CHANGE_FONT",
         pattern=r"""(đổi|sửa|thay)\s+font\s+file\s+.*?["']?(?P<file_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)["']?\s+(?:sang|thành)\s+(?P<font_name>[\w\s]+)""",
@@ -54,7 +66,7 @@ def build_engine() -> IntentEngine:
         handler=lambda file_path, font_name: OfficePlugins.change_word_font(file_path, font_name.strip())
     )
     
-    # 4. Word: Tìm kiếm & Thay thế văn bản
+    # Tìm kiếm & Thay thế văn bản trong Word
     engine.register(
         intent_name="WORD_REPLACE_TEXT",
         pattern=r"""thay\s+thế\s+(?:từ\s+)?["']?(?P<old_text>[^\s"']+)["']?\s+thành\s+["']?(?P<new_text>[^\s"']+)["']?\s+trong\s+file\s+(?P<file_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)""",
@@ -62,15 +74,16 @@ def build_engine() -> IntentEngine:
         handler=lambda old_text, new_text, file_path: OfficePlugins.replace_text_word(file_path, old_text, new_text)
     )
 
-    # 5. Word: Chuyển đổi Word sang PDF
+    # Chuyển đổi Word sang PDF
     engine.register(
         intent_name="WORD_TO_PDF",
         pattern=r"""(chuyển|xuất|convert)\s+file\s+(?P<file_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)\s+sang\s+pdf""",
         keywords=["sang pdf", "chuyển pdf", "word sang pdf"],
         handler=lambda file_path: OfficePlugins.convert_word_to_pdf(file_path)
     )
-    
-    # 6. Excel: Tính Toán Cột (Tổng / Trung Bình / Max / Min)
+
+    # ==================== 3. TỰ ĐỘNG HÓA EXCEL ====================
+    # Tính toán Cột Excel (Tổng / Trung Bình / Max / Min)
     engine.register(
         intent_name="EXCEL_CALCULATE_COL",
         pattern=r"""(tính|cộng)\s+(?P<calc_type>tổng|trung bình|lớn nhất|nhỏ nhất)?\s*cột\s+(?P<col_letter>[a-zA-Z]+)\s+file\s+(?P<file_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)""",
@@ -78,12 +91,46 @@ def build_engine() -> IntentEngine:
         handler=lambda file_path, col_letter, calc_type="sum": OfficePlugins.calculate_excel_column(file_path, col_letter, calc_type or "sum")
     )
 
-    # 7. File: Liệt kê danh sách file theo đuôi
+    # ==================== 4. ĐIỀU KHUYỂN HỆ THỐNG & WORKSPACE ====================
+    # Mở Workspace làm việc theo bối cảnh
     engine.register(
-        intent_name="FILE_LIST_BY_EXT",
-        pattern=r"""liệt\s+kê\s+file\s+(?P<extension>\.\w+|\w+)\s+trong\s+(?P<folder_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)""",
-        keywords=["liệt kê file", "danh sách file"],
-        handler=lambda extension, folder_path: FilePlugins.list_files_by_ext(folder_path, extension)
+        intent_name="SYS_WORKSPACE",
+        pattern=r"""(bắt\s+đầu|kích\s+hoạt|mở)\s+(?:ca\s+|không\s+gian\s+)?(?P<workspace_name>lập\s+trình|code|học\s+tập|văn\s+phòng)""",
+        keywords=["bắt đầu ca", "mở không gian", "ca học", "ca làm việc"],
+        handler=lambda workspace_name: SystemPlugins.launch_workspace(workspace_name)
+    )
+
+    # Gom & Nén File Điều Kiện (Smart Zip)
+    engine.register(
+        intent_name="SYS_SMART_ZIP",
+        pattern=r"""gom\s+file\s+trong\s+(?P<folder_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)\s+trong\s+(?P<days>\d+)\s+ngày\s+nén\s+thành\s+zip""",
+        keywords=["gom file", "nén zip", "nén file tuần này"],
+        handler=lambda folder_path, days=7: SystemPlugins.zip_files_by_condition(folder_path, int(days) if days else 7)
+    )
+
+    # Chuẩn hóa văn bản trong Clipboard
+    engine.register(
+        intent_name="SYS_CLIPBOARD",
+        pattern=r"""(làm\s+sạch|chuẩn\s+hóa)\s+(?:khay\s+nhớ\s+tạm|clipboard)""",
+        keywords=["làm sạch clipboard", "chuẩn hóa clipboard"],
+        handler=lambda: SystemPlugins.process_clipboard()
+    )
+
+    # ==================== 5. CODE DOCS & AUTO-VIZ ====================
+    # Phân tích mã nguồn và tự sinh file README.md
+    engine.register(
+        intent_name="CODE_GEN_README",
+        pattern=r"""(tạo|viết)\s+(?:tài\s+liệu|readme)\s+cho\s+(?:thư\s+mục\s+)?(?P<folder_path>[a-zA-Z]:\\[^"'\n]+|["'].+?["']|\S+)""",
+        keywords=["tạo readme", "viết tài liệu", "tài liệu code"],
+        handler=lambda folder_path: CodePlugins.generate_readme_from_code(folder_path)
+    )
+
+    # Vẽ biểu đồ Excel chèn trực tiếp vào Word (Auto-Viz)
+    engine.register(
+        intent_name="VIZ_AUTO_CHART",
+        pattern=r"""vẽ\s+biểu\s+đồ\s+cột\s+(?P<col_val>[a-zA-Z]+)\s+theo\s+cột\s+(?P<col_label>[a-zA-Z]+)\s+file\s+(?P<excel_file>[a-zA-Z]:\\[^"'\n]+|\S+)\s+chèn\s+vào\s+(?P<word_file>[a-zA-Z]:\\[^"'\n]+|\S+)""",
+        keywords=["vẽ biểu đồ", "vẽ chart", "chèn biểu đồ"],
+        handler=lambda excel_file, word_file, col_label, col_val: VizPlugins.create_chart_to_word(excel_file, word_file, col_label, col_val)
     )
     
     return engine
@@ -93,6 +140,7 @@ def main():
     display_welcome_banner(console)
     engine = build_engine()
     
+    # Thiết lập Gợi ý thông minh (Auto-complete & Ghost text)
     completer = IsoBrainCompleter()
     auto_suggest = SmartAutoSuggest()
     
@@ -116,13 +164,12 @@ def main():
             
             if match.intent_name != "UNKNOWN" and match.handler:
                 if match.entities:
-                    # Gọi hàm qua Dispatcher lọc tham số an toàn
                     result = execute_handler(match.handler, match.entities)
                 else:
-                    result = "[yellow]IsoBrain hiểu ý định nhưng chưa trích xuất đủ tham số (đường dẫn/tên file). Bạn thử gõ rõ đường dẫn hơn nhé![/yellow]"
+                    result = execute_handler(match.handler, {})
                 console.print(result)
             else:
-                console.print("[red]Lệnh chưa rõ hoặc chưa hỗ trợ. Bạn thử gõ lại câu ngắn gọn hơn nhé![/red]")
+                console.print("[red]Lệnh chưa rõ hoặc chưa hỗ trợ. Thử gõ: 'bắt đầu ca lập trình' hoặc 'tạo file khbg.docx trong D:\\'[/red]")
                 
         except KeyboardInterrupt:
             continue
