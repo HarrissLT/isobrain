@@ -1,0 +1,16 @@
+# Môi trường ảo
+venv/
+ENV/
+env/
+
+# Python cache & build rác
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# File tạm VS Code
+.vscode/
+.DS_Store
