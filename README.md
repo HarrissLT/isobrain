@@ -23,4 +23,4 @@
 Mở Terminal / PowerShell trên máy tính của bạn và gõ:
 
 ```bash
-pip install git+https://github.com/TÊN_GITHUB_CỦA_BẠN/isobrain.git
+pip install git+https://github.com/HarrissLT/isobrain.git
