@@ -11,8 +11,9 @@ class IntentEngine:
         self.rules.append((intent_name, pattern, keywords, handler))
 
     def _extract_fallback_entities(self, text: str) -> Dict[str, Any]:
-        """Tự động rút trích đường dẫn, tên file, từ khóa khi câu gõ không khớp Regex chuẩn"""
+        """Tự động rút trích tham số thông minh khi rơi vào Layer 2 Fuzzy Matching"""
         entities = {}
+        text_lower = text.lower()
         
         # 1. Trích xuất đường dẫn Windows
         path_match = re.search(r"""([a-zA-Z]:\\[^"'\n]+?)(?=\s+từ|\s+thành|\s+sang|\s+trong|$)""", text)
@@ -23,7 +24,18 @@ class IntentEngine:
             entities["folder_path"] = extracted_path
             entities["file_path"] = extracted_path
 
-        # 2. Trích xuất từ ngữ sau từ khóa 'từ', 'thành', 'sang'
+        # 2. Trích xuất mode (nhẹ nhất vs nặng nhất)
+        if "nhẹ" in text_lower or "nhỏ" in text_lower:
+            entities["mode"] = "smallest"
+        elif "nặng" in text_lower or "lớn" in text_lower:
+            entities["mode"] = "largest"
+
+        # 3. Trích xuất con số Top N (ví dụ: 5 file)
+        top_n_match = re.search(r'(\d+)\s*file', text_lower)
+        if top_n_match:
+            entities["top_n"] = top_n_match.group(1)
+
+        # 4. Trích xuất từ ngữ sau 'từ', 'thành', 'sang'
         from_match = re.search(r"""từ\s+["']?(?P<old_str>[^\s"']+)""", text, re.IGNORECASE)
         if from_match:
             entities["old_str"] = from_match.group("old_str")
@@ -34,7 +46,7 @@ class IntentEngine:
             entities["new_str"] = target_val
             entities["font_name"] = target_val
 
-        # 3. Trích xuất tên file
+        # 5. Trích xuất tên file
         file_name_match = re.search(r"""[\w\.-]+\.(docx|xlsx|pdf|txt)""", text, re.IGNORECASE)
         if file_name_match:
             entities["file_name"] = file_name_match.group(0)
@@ -64,7 +76,7 @@ class IntentEngine:
         for intent_name, _, keywords, handler in self.rules:
             for kw in keywords:
                 score = fuzz.partial_ratio(kw.lower(), text_clean.lower())
-                if score > best_score and score >= 65.0:
+                if score > best_score and score >= 60.0:
                     best_score = score
                     best_intent = intent_name
                     best_handler = handler
